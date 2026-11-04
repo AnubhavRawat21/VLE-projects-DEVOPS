@@ -1,0 +1,85 @@
+pipeline {
+    agent any
+
+    environment {
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'
+    }
+
+    stages {
+        stage('Build Blue and Green Images') {
+            steps {
+                sh '''
+                    docker build -f blue-green/Dockerfile \
+                      --build-arg APP_FILE=app/index-blue.html \
+                      -t myapp:v1 blue-green
+
+                    docker build -f blue-green/Dockerfile \
+                      --build-arg APP_FILE=app/index-green.html \
+                      -t myapp:v2 blue-green
+                '''
+            }
+        }
+
+        stage('Load Images into Minikube') {
+            steps {
+                sh 'sudo /usr/local/sbin/jenkins-minikube-load-bg'
+            }
+        }
+
+        stage('Deploy Blue and Green') {
+            steps {
+                sh '''
+                    kubectl apply -f blue-green/k8s/deployment-blue.yaml
+                    kubectl apply -f blue-green/k8s/deployment-green.yaml
+                    kubectl apply -f blue-green/k8s/service.yaml
+
+                    kubectl rollout status deployment/myapp-blue --timeout=180s
+                    kubectl rollout status deployment/myapp-green --timeout=180s
+                '''
+            }
+        }
+
+        stage('Verify Environments') {
+            steps {
+                sh '''
+                    kubectl get deployments -l app=myapp
+                    kubectl get pods -l app=myapp
+                    kubectl get svc myapp-service
+                '''
+            }
+        }
+
+        stage('Approve Traffic Switch') {
+            steps {
+                input message: 'Both environments are ready. Switch traffic from BLUE to GREEN?'
+            }
+        }
+
+        stage('Switch Traffic to Green') {
+            steps {
+                sh '''
+                    kubectl patch service myapp-service \
+                      -p '{"spec":{"selector":{"app":"myapp","color":"green"}}}'
+                '''
+            }
+        }
+
+        stage('Verify Green is Live') {
+            steps {
+                sh '''
+                    kubectl get endpoints myapp-service
+                    kubectl get svc myapp-service
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Blue-Green deployment completed successfully!'
+        }
+        failure {
+            echo 'Blue-Green pipeline failed. Check the console output.'
+        }
+    }
+}
