@@ -1,0 +1,31 @@
+---
+- name: Configure existing EC2 instance for DevOps
+  hosts: local
+  become: yes
+
+  tasks:
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+
+    - name: Install Docker and Git
+      apt:
+        name:
+          - docker.io
+          - git
+        state: present
+
+    - name: Ensure Docker is enabled and running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Verify Docker installation
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Display Docker version
+      debug:
+        var: docker_version.stdout
